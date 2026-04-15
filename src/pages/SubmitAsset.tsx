@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Upload, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Upload, Check, Loader2, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase, db } from "@/lib/supabase";
@@ -16,11 +16,19 @@ const ASSET_TYPES = [
   { value: "other",       label: "Other"        },
 ];
 
+const DOC_SLOTS = [
+  { key: "ownership",  label: "Ownership Proof"   },
+  { key: "geological", label: "Geological Report" },
+  { key: "audit",      label: "Audit Report"      },
+];
+
 const SubmitAsset = () => {
   const [step, setStep]       = useState(1);
   const [loading, setLoading] = useState(false);
+  const [assetId, setAssetId] = useState<string | null>(null);
   const navigate              = useNavigate();
-  const [form, setForm]       = useState({
+
+  const [form, setForm] = useState({
     name:        "",
     type:        "commodity",
     location:    "",
@@ -28,58 +36,111 @@ const SubmitAsset = () => {
     description: "",
   });
 
-  const handleSubmit = async () => {
+  // Track uploaded files per slot
+  const [files, setFiles] = useState<Record<string, File | null>>({
+    ownership:  null,
+    geological: null,
+    audit:      null,
+  });
+
+  const [uploading, setUploading] = useState<Record<string, boolean>>({
+    ownership:  false,
+    geological: false,
+    audit:      false,
+  });
+
+  // ── Step 1 → Step 2: save asset first ──
+  const handleContinueToDocuments = async () => {
     if (!form.name)     { toast.error("Asset name is required");  return; }
     if (!form.location) { toast.error("Location is required");    return; }
     if (!form.value)    { toast.error("Value is required");       return; }
 
     setLoading(true);
-
     try {
-      // 1. Get current logged in user
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast.error("You must be logged in to submit an asset");
-        navigate("/login");
-        return;
-      }
+      if (!user) { toast.error("Please log in first"); navigate("/login"); return; }
 
-      // 2. Get their profile from users table
-      const { data: profile, error: profileError } = await db.users()
+      const { data: profile } = await db.users()
         .select("id")
         .eq("auth_id", user.id)
         .single();
 
-      if (profileError || !profile) {
-        toast.error("Could not find your profile");
-        return;
-      }
+      if (!profile) { toast.error("Profile not found"); return; }
 
-      // 3. Insert asset with owner_id
-      const { data: asset, error: assetError } = await db.assets()
+      const { data: asset, error } = await db.assets()
         .insert({
-          owner_id:      profile.id,
-          name:          form.name,
-          asset_type:    form.type as any,
-          location:      form.location,
-          description:   form.description || null,
-          valuation_usd: parseFloat(form.value),
-          status:        "pending",
+          owner_id:       profile.id,
+          name:           form.name,
+          asset_type:     form.type as any,
+          location:       form.location,
+          description:    form.description || null,
+          valuation_usd:  parseFloat(form.value),
+          status:         "pending",
           asset_metadata: {},
         })
         .select("id")
         .single();
 
-      if (assetError) throw assetError;
+      if (error) throw error;
 
-      toast.success("Asset submitted for verification!");
-      navigate("/assets");
-
+      setAssetId(asset.id);
+      setStep(2);
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to submit asset");
+      toast.error(err?.message ?? "Failed to save asset");
     } finally {
       setLoading(false);
     }
+  };
+
+  // ── Upload a single file ──
+  const handleFileUpload = async (slotKey: string, file: File) => {
+    if (!assetId) return;
+
+    setUploading(prev => ({ ...prev, [slotKey]: true }));
+    try {
+      // 1. Upload to Supabase Storage
+      const path = `${assetId}/${slotKey}-${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("asset-docs")
+        .upload(path, file);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get public URL
+      const { data: urlData } = supabase.storage
+        .from("asset-docs")
+        .getPublicUrl(path);
+
+      // 3. Save metadata to documents table
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile }  = await db.users()
+        .select("id").eq("auth_id", user!.id).single();
+
+      await db.documents().insert({
+        asset_id:        assetId,
+        uploaded_by:     profile!.id,
+        doc_type:        "other",
+        file_name:       file.name,
+        file_url:        urlData.publicUrl,
+        file_size_bytes: file.size,
+        mime_type:       file.type,
+        is_public:       false,
+        doc_metadata:    { slot: slotKey },
+      });
+
+      setFiles(prev => ({ ...prev, [slotKey]: file }));
+      toast.success(`${file.name} uploaded`);
+    } catch (err: any) {
+      toast.error(err?.message ?? "Upload failed");
+    } finally {
+      setUploading(prev => ({ ...prev, [slotKey]: false }));
+    }
+  };
+
+  // ── Final submit ──
+  const handleSubmit = async () => {
+    toast.success("Asset submitted for verification!");
+    navigate("/assets");
   };
 
   return (
@@ -127,9 +188,7 @@ const SubmitAsset = () => {
             </h2>
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1">
-                  Asset Name *
-                </label>
+                <label className="text-sm font-medium text-foreground block mb-1">Asset Name *</label>
                 <Input
                   placeholder="e.g. rGOLD-005"
                   value={form.name}
@@ -137,9 +196,7 @@ const SubmitAsset = () => {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1">
-                  Asset Type *
-                </label>
+                <label className="text-sm font-medium text-foreground block mb-1">Asset Type *</label>
                 <select
                   value={form.type}
                   onChange={(e) => setForm({ ...form, type: e.target.value })}
@@ -151,9 +208,7 @@ const SubmitAsset = () => {
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1">
-                  Location *
-                </label>
+                <label className="text-sm font-medium text-foreground block mb-1">Location *</label>
                 <Input
                   placeholder="e.g. Zurich, Switzerland"
                   value={form.location}
@@ -161,9 +216,7 @@ const SubmitAsset = () => {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1">
-                  Estimated Value (USD) *
-                </label>
+                <label className="text-sm font-medium text-foreground block mb-1">Estimated Value (USD) *</label>
                 <Input
                   type="number"
                   placeholder="0.00"
@@ -172,9 +225,7 @@ const SubmitAsset = () => {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1">
-                  Description
-                </label>
+                <label className="text-sm font-medium text-foreground block mb-1">Description</label>
                 <Input
                   placeholder="Brief description..."
                   value={form.description}
@@ -184,33 +235,70 @@ const SubmitAsset = () => {
             </div>
             <Button
               className="bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => setStep(2)}
+              onClick={handleContinueToDocuments}
+              disabled={loading}
             >
-              Continue
+              {loading
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
+                : "Continue"
+              }
             </Button>
           </div>
         )}
 
-        {/* Step 2 — Documents (UI only for now) */}
+        {/* Step 2 — Document Upload */}
         {step === 2 && (
           <div className="space-y-4">
             <h2 className="font-display font-semibold text-lg text-foreground">
               Upload Documents
             </h2>
-            {["Ownership Proof", "Geological Report", "Audit Report"].map((doc) => (
-              <div
-                key={doc}
-                className="border border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer"
-              >
-                <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm font-medium text-foreground">{doc}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  PDF, JPG, PNG (max 10MB)
-                </p>
+            {DOC_SLOTS.map((slot) => (
+              <div key={slot.key}>
+                <label className="text-sm font-medium text-foreground block mb-2">
+                  {slot.label}
+                </label>
+                {files[slot.key] ? (
+                  <div className="border border-border rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-500" />
+                      <span className="text-sm text-foreground">
+                        {files[slot.key]!.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setFiles(prev => ({ ...prev, [slot.key]: null }))}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="border border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer block">
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(slot.key, file);
+                      }}
+                    />
+                    {uploading[slot.key] ? (
+                      <Loader2 className="w-8 h-8 mx-auto text-muted-foreground animate-spin mb-2" />
+                    ) : (
+                      <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                    )}
+                    <p className="text-sm font-medium text-foreground">
+                      {uploading[slot.key] ? "Uploading..." : "Click to upload"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      PDF, JPG, PNG (max 10MB)
+                    </p>
+                  </label>
+                )}
               </div>
             ))}
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+            <div className="flex gap-3 pt-2">
               <Button
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => setStep(3)}
@@ -229,25 +317,21 @@ const SubmitAsset = () => {
             </h2>
             <div className="space-y-2 text-sm">
               {[
-                { label: "Name",     value: form.name },
-                { label: "Type",     value: form.type },
-                { label: "Location", value: form.location },
-                { label: "Value",    value: `$${Number(form.value || 0).toLocaleString()}` },
-                { label: "Status",   value: "Pending verification" },
+                { label: "Name",      value: form.name },
+                { label: "Type",      value: form.type },
+                { label: "Location",  value: form.location },
+                { label: "Value",     value: `$${Number(form.value || 0).toLocaleString()}` },
+                { label: "Documents", value: `${Object.values(files).filter(Boolean).length} uploaded` },
+                { label: "Status",    value: "Pending verification" },
               ].map(({ label, value }) => (
-                <div
-                  key={label}
-                  className="flex justify-between py-2 border-b border-border"
-                >
+                <div key={label} className="flex justify-between py-2 border-b border-border">
                   <span className="text-muted-foreground">{label}</span>
                   <span className="text-foreground font-medium">{value || "—"}</span>
                 </div>
               ))}
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep(2)}>
-                Back
-              </Button>
+              <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
               <Button
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={handleSubmit}
