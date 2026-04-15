@@ -1,79 +1,90 @@
-import { useState } from "react";
+﻿import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { marketPairs } from "@/data/mockData";
+import { db } from "@/lib/supabase";
 import { Link } from "react-router-dom";
-import { ShieldCheck, Search } from "lucide-react";
+import { ShieldCheck, Search, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 const Markets = () => {
-  const [verifiedOnly, setVerifiedOnly] = useState(false);
-  const [search, setSearch] = useState("");
+  const [assets,  setAssets]  = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search,  setSearch]  = useState("");
 
-  const filtered = marketPairs
-    .filter((p) => !verifiedOnly || p.verified)
-    .filter((p) => p.pair.toLowerCase().includes(search.toLowerCase()));
+  useEffect(() => {
+    const fetchAssets = async () => {
+      setLoading(true);
+      const { data, error } = await db.assets()
+        .select("id, name, asset_type, valuation_usd, status, location, created_at")
+        .in("status", ["verified", "listed"])
+        .order("created_at", { ascending: false });
+      if (!error) setAssets(data ?? []);
+      setLoading(false);
+    };
+    fetchAssets();
+  }, []);
+
+  const filtered = assets.filter((a) =>
+    a.name.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-7xl">
-      <h1 className="text-3xl font-display font-bold text-foreground">Markets</h1>
+      <div>
+        <h1 className="text-3xl font-display font-bold text-foreground">Markets</h1>
+        <p className="text-muted-foreground mt-1">Verified real-world assets available for trading</p>
+      </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search pairs..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <button
-          onClick={() => setVerifiedOnly(!verifiedOnly)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-            verifiedOnly ? "bg-emerald/10 text-emerald border-emerald/30" : "bg-card text-muted-foreground border-border hover:text-foreground"
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" /> Verified Only
-        </button>
+      <div className="relative max-w-sm">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input placeholder="Search assets..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
 
       <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border text-left">
-              <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Pair</th>
-              <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Price</th>
-              <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">24h Change</th>
-              <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Volume</th>
-              <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((pair) => (
-              <Link
-                key={pair.pair}
-                to={`/trade?pair=${encodeURIComponent(pair.pair)}`}
-                className="contents"
-              >
-                <tr className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors cursor-pointer">
-                  <td className="px-5 py-4 font-semibold text-sm text-foreground">{pair.pair}</td>
-                  <td className="px-5 py-4 text-sm font-medium text-foreground">${pair.price.toLocaleString()}</td>
-                  <td className={`px-5 py-4 text-sm font-semibold ${pair.change24h >= 0 ? "text-emerald" : "text-destructive"}`}>
-                    {pair.change24h >= 0 ? "+" : ""}{pair.change24h}%
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm gap-2">
+            <p>No verified assets listed yet</p>
+            <p className="text-xs">Assets must be verified and listed by an admin first</p>
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border text-left">
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Asset</th>
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Valuation</th>
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                <th className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((asset) => (
+                <tr key={asset.id} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
+                  <td className="px-5 py-4 font-semibold text-sm text-foreground">{asset.name}</td>
+                  <td className="px-5 py-4 text-sm text-muted-foreground capitalize">{asset.asset_type?.replace("_", " ")}</td>
+                  <td className="px-5 py-4 text-sm text-muted-foreground">{asset.location ?? "—"}</td>
+                  <td className="px-5 py-4 text-sm font-medium text-foreground">
+                    {asset.valuation_usd ? "$" + Number(asset.valuation_usd).toLocaleString() : "—"}
                   </td>
-                  <td className="px-5 py-4 text-sm text-muted-foreground">${(pair.volume / 1e6).toFixed(1)}M</td>
                   <td className="px-5 py-4">
-                    {pair.verified && (
-                      <span className="inline-flex items-center gap-1 text-emerald text-xs font-semibold">
-                        <ShieldCheck className="w-3.5 h-3.5" /> Verified
-                      </span>
-                    )}
+                    <span className="inline-flex items-center gap-1 text-emerald-500 text-xs font-semibold">
+                      <ShieldCheck className="w-3.5 h-3.5" /> {asset.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4">
+                    <Link to={"/trade?asset=" + asset.id} className="text-xs text-primary hover:underline font-medium">
+                      Trade
+                    </Link>
                   </td>
                 </tr>
-              </Link>
-            ))}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </motion.div>
   );
