@@ -15,6 +15,8 @@ import Portfolio from "@/pages/Portfolio";
 import StakeRT from "@/pages/StakeRT";
 import SettingsPage from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import Login from "@/pages/Login";
+import Signup from "@/pages/Signup";
 
 const queryClient = new QueryClient();
 
@@ -26,17 +28,23 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            {/* Auth pages — no sidebar */}
+            <Route path="/login"  element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+
+            {/* Main app — with sidebar */}
             <Route element={<AppLayout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/assets" element={<Assets />} />
+              <Route path="/"              element={<Dashboard />} />
+              <Route path="/assets"        element={<Assets />} />
               <Route path="/assets/submit" element={<SubmitAsset />} />
-              <Route path="/assets/:id" element={<AssetDetail />} />
-              <Route path="/markets" element={<Markets />} />
-              <Route path="/trade" element={<TradePage />} />
-              <Route path="/portfolio" element={<Portfolio />} />
-              <Route path="/stake" element={<StakeRT />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/assets/:id"    element={<AssetDetail />} />
+              <Route path="/markets"       element={<Markets />} />
+              <Route path="/trade"         element={<TradePage />} />
+              <Route path="/portfolio"     element={<Portfolio />} />
+              <Route path="/stake"         element={<StakeRT />} />
+              <Route path="/settings"      element={<SettingsPage />} />
             </Route>
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
