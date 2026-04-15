@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -17,6 +17,7 @@ import SettingsPage from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
+import Admin from "@/pages/Admin";
 
 const queryClient = new QueryClient();
 
@@ -28,11 +29,8 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            {/* Auth pages — no sidebar */}
             <Route path="/login"  element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-
-            {/* Main app — with sidebar */}
             <Route element={<AppLayout />}>
               <Route path="/"              element={<Dashboard />} />
               <Route path="/assets"        element={<Assets />} />
@@ -43,8 +41,8 @@ const App = () => (
               <Route path="/portfolio"     element={<Portfolio />} />
               <Route path="/stake"         element={<StakeRT />} />
               <Route path="/settings"      element={<SettingsPage />} />
+              <Route path="/admin"         element={<Admin />} />
             </Route>
-
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
